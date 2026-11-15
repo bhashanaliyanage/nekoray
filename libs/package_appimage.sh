@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 sudo apt-get install fuse -y
 
@@ -11,7 +12,7 @@ rm nekobox.AppDir/launcher
 cat >nekobox.AppDir/nekobox.desktop <<-EOF
 [Desktop Entry]
 Name=nekobox
-Exec=echo "nekobox started"
+Exec=AppRun
 Icon=nekobox
 Type=Application
 Categories=Network
@@ -28,7 +29,7 @@ chmod +x nekobox.AppDir/AppRun
 
 # build
 
-curl -fLSO https://github.com/AppImage/AppImageKit/releases/latest/download/appimagetool-x86_64.AppImage
+curl -fLSo appimagetool-x86_64.AppImage https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
 chmod +x appimagetool-x86_64.AppImage
 ./appimagetool-x86_64.AppImage nekobox.AppDir
 
