@@ -19,8 +19,8 @@ if [ -z $NKR_PACKAGE ]; then
 else
   INSTALL_PREFIX=$PWD/package
 fi
-rm -rf $INSTALL_PREFIX
-mkdir -p $INSTALL_PREFIX
+rm -rf "$INSTALL_PREFIX"
+mkdir -p "$INSTALL_PREFIX"
 
 #### clean ####
 clean() {
@@ -35,8 +35,9 @@ cd zxing-*
 mkdir -p build
 cd build
 
-$cmake .. -GNinja -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DBUILD_BLACKBOX_TESTS=OFF -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX
-ninja && ninja install
+$cmake .. -GNinja -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DBUILD_BLACKBOX_TESTS=OFF "-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+ninja
+ninja install
 
 cd ../..
 
@@ -45,11 +46,14 @@ curl -L -o dl.zip https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-
 unzip dl.zip
 
 cd yaml-*
+# Older yaml-cpp relies on a transitive include removed by recent compilers.
+sed -i '1i#include <cstdint>' src/emitterutils.cpp
 mkdir -p build
 cd build
 
-$cmake .. -GNinja -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX
-ninja && ninja install
+$cmake .. -GNinja -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release "-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+ninja
+ninja install
 
 cd ../..
 
@@ -66,8 +70,10 @@ $cmake .. -GNinja \
   -DBUILD_SHARED_LIBS=OFF \
   -Dprotobuf_MSVC_STATIC_RUNTIME=OFF \
   -Dprotobuf_BUILD_TESTS=OFF \
-  -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX
-ninja && ninja install
+  "-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX" \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+ninja
+ninja install
 
 cd ../..
 
