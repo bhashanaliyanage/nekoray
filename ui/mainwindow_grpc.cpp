@@ -3,6 +3,7 @@
 
 #include "db/Database.hpp"
 #include "db/ConfigBuilder.hpp"
+#include "fmt/includes.h"
 #include "db/traffic/TrafficLooper.hpp"
 #include "rpc/gRPC.h"
 #include "ui/widget/MessageBoxTimer.h"
@@ -14,6 +15,8 @@
 #include <QDesktopServices>
 #include <QMessageBox>
 #include <QDialogButtonBox>
+#include <QHostInfo>
+#include <QSet>
 
 // ext core
 
@@ -299,7 +302,81 @@ void MainWindow::neko_start(int _id) {
     auto group = NekoGui::profileManager->GetGroup(ent->gid);
     if (group == nullptr || group->archive) return;
 
-    auto result = BuildConfig(ent, false, false);
+    QHash<int, QString> resolvedAddresses;
+    if (pendingResolutionProfileId == ent->id) {
+        resolvedAddresses = pendingResolvedAddresses;
+        pendingResolvedAddresses.clear();
+        pendingResolutionProfileId = -1;
+    } else {
+        if (resolvingProfileAddresses) return;
+
+        // Follow the same chain/front-proxy expansion as the config builder and
+        // resolve every endpoint asynchronously without editing the profiles.
+        QList<std::shared_ptr<NekoGui::ProxyEntity>> endpoints;
+        auto appendEndpoint = [&](const std::shared_ptr<NekoGui::ProxyEntity> &candidate) {
+            if (candidate == nullptr) return;
+            if (candidate->type == "chain") {
+                auto ids = candidate->ChainBean()->list;
+                std::reverse(ids.begin(), ids.end());
+                for (const auto id : ids) endpoints += NekoGui::profileManager->GetProfile(id);
+            } else {
+                endpoints += candidate;
+            }
+        };
+        appendEndpoint(ent);
+        if (group->front_proxy_id >= 0) appendEndpoint(NekoGui::profileManager->GetProfile(group->front_proxy_id));
+
+        struct HostLookup { int profileId; QString host; };
+        auto lookups = std::make_shared<QList<HostLookup>>();
+        QSet<int> seenProfiles;
+        for (const auto &endpoint : endpoints) {
+            if (endpoint == nullptr || endpoint->bean == nullptr) continue;
+            if (seenProfiles.contains(endpoint->id)) continue;
+            seenProfiles.insert(endpoint->id);
+            auto host = endpoint->bean->serverAddress;
+            auto customBean = dynamic_cast<NekoGui_fmt::CustomBean *>(endpoint->bean.get());
+            if (customBean != nullptr && customBean->core == "internal") {
+                const auto configHost = QString2QJsonObject(customBean->config_simple)["server"].toString();
+                if (!configHost.isEmpty()) host = configHost;
+            }
+            if (!host.isEmpty() && !IsIpAddress(host)) lookups->append({endpoint->id, host});
+        }
+
+        if (!lookups->isEmpty()) {
+            resolvingProfileAddresses = true;
+            auto addresses = std::make_shared<QHash<int, QString>>();
+            auto remaining = std::make_shared<int>(lookups->size());
+            auto failed = std::make_shared<QString>();
+            for (const auto &lookup : *lookups) {
+                QHostInfo::lookupHost(lookup.host, this, [=](const QHostInfo &info) {
+                    if (info.error() != QHostInfo::NoError || info.addresses().isEmpty()) {
+                        if (failed->isEmpty()) {
+                            *failed = tr("Could not resolve server address '%1': %2\n\nCheck your system DNS connection and the hostname, then try again.")
+                                         .arg(lookup.host, info.errorString());
+                        }
+                    } else {
+                        addresses->insert(lookup.profileId, info.addresses().first().toString());
+                    }
+                    if (--(*remaining) != 0) return;
+                    resolvingProfileAddresses = false;
+                    if (!failed->isEmpty()) {
+                        MessageBoxWarning(tr("Server address lookup failed"), *failed);
+                        return;
+                    }
+                    pendingResolvedAddresses = *addresses;
+                    pendingResolutionProfileId = ent->id;
+                    neko_start(ent->id);
+                });
+            }
+            return;
+        }
+        pendingResolvedAddresses.clear();
+        pendingResolutionProfileId = ent->id;
+        neko_start(ent->id);
+        return;
+    }
+
+    auto result = BuildConfig(ent, false, false, resolvedAddresses);
     if (!result->error.isEmpty()) {
         MessageBoxWarning("BuildConfig return error", result->error);
         return;

@@ -70,13 +70,15 @@ namespace NekoGui {
 
     // Common
 
-    std::shared_ptr<BuildConfigResult> BuildConfig(const std::shared_ptr<ProxyEntity> &ent, bool forTest, bool forExport) {
+    std::shared_ptr<BuildConfigResult> BuildConfig(const std::shared_ptr<ProxyEntity> &ent, bool forTest, bool forExport,
+                                                   const QHash<int, QString> &resolvedAddresses) {
         auto result = std::make_shared<BuildConfigResult>();
         auto status = std::make_shared<BuildConfigStatus>();
         status->ent = ent;
         status->result = result;
         status->forTest = forTest;
         status->forExport = forExport;
+        status->resolvedAddresses = resolvedAddresses;
 
         auto customBean = dynamic_cast<NekoGui_fmt::CustomBean *>(ent->bean.get());
         if (customBean != nullptr && customBean->core == "internal-full") {
@@ -271,7 +273,7 @@ namespace NekoGui {
                     {"tag", tagOut + "-mapping"},
                     {"listen", "127.0.0.1"},
                     {"listen_port", ext_mapping_port},
-                    {"override_address", ent->bean->serverAddress},
+                    {"override_address", status->resolvedAddresses.value(ent->id, ent->bean->serverAddress)},
                     {"override_port", ent->bean->serverPort},
                 };
                 // no chain rule and not outbound, so need to set to direct
@@ -289,7 +291,31 @@ namespace NekoGui {
             auto stream = GetStreamSettings(ent->bean.get());
 
             if (thisExternalStat > 0) {
+                // External core builders read bean fields directly. Substitute
+                // the resolved endpoint only during this synchronous build and
+                // restore the persisted bean immediately afterwards.
+                const auto originalAddress = ent->bean->serverAddress;
+                QString originalSni;
+                bool restoreNaiveSni = false;
+                bool restoreQuicSni = false;
+                NekoGui_fmt::NaiveBean *naiveBean = dynamic_cast<NekoGui_fmt::NaiveBean *>(ent->bean.get());
+                NekoGui_fmt::QUICBean *quicBean = dynamic_cast<NekoGui_fmt::QUICBean *>(ent->bean.get());
+                if (status->resolvedAddresses.contains(ent->id)) {
+                    ent->bean->serverAddress = status->resolvedAddresses.value(ent->id);
+                    if (naiveBean != nullptr && naiveBean->sni.isEmpty()) {
+                        originalSni = naiveBean->sni;
+                        restoreNaiveSni = true;
+                        naiveBean->sni = originalAddress;
+                    } else if (quicBean != nullptr && quicBean->sni.isEmpty()) {
+                        originalSni = quicBean->sni;
+                        restoreQuicSni = true;
+                        quicBean->sni = originalAddress;
+                    }
+                }
                 auto extR = ent->bean->BuildExternal(ext_mapping_port, ext_socks_port, thisExternalStat);
+                ent->bean->serverAddress = originalAddress;
+                if (restoreNaiveSni) naiveBean->sni = originalSni;
+                if (restoreQuicSni) quicBean->sni = originalSni;
                 if (extR.program.isEmpty()) {
                     status->result->error = QObject::tr("Core not found: %1").arg(ent->bean->DisplayCoreType());
                     return {};
@@ -363,12 +389,36 @@ namespace NekoGui {
             MergeJson(outbound, QString2QJsonObject(ent->bean->custom_outbound));
 
             // Bypass Lookup for the first profile
-            auto serverAddress = ent->bean->serverAddress;
+            auto serverAddress = status->resolvedAddresses.value(ent->id, ent->bean->serverAddress);
 
             auto customBean = dynamic_cast<NekoGui_fmt::CustomBean *>(ent->bean.get());
             if (customBean != nullptr && customBean->core == "internal") {
                 auto server = QString2QJsonObject(customBean->config_simple)["server"].toString();
-                if (!server.isEmpty()) serverAddress = server;
+                if (!server.isEmpty()) serverAddress = status->resolvedAddresses.value(ent->id, server);
+            }
+
+            // Use the resolved IP only in this generated runtime config. Keep the
+            // profile's hostname for TLS verification and WebSocket virtual hosting.
+            if (status->resolvedAddresses.contains(ent->id)) {
+                const auto originalHost = customBean != nullptr && customBean->core == "internal"
+                                              ? QString2QJsonObject(customBean->config_simple)["server"].toString()
+                                              : ent->bean->serverAddress;
+                outbound["server"] = serverAddress;
+                auto stream = GetStreamSettings(ent->bean.get());
+                if (stream != nullptr && stream->security == "tls") {
+                    auto tls = outbound["tls"].toObject();
+                    if (tls["server_name"].toString().isEmpty()) tls["server_name"] = originalHost;
+                    outbound["tls"] = tls;
+                }
+                if (stream != nullptr && stream->network == "ws" && !originalHost.isEmpty()) {
+                    auto transport = outbound["transport"].toObject();
+                    if (transport["type"].toString() == "ws") {
+                        auto headers = transport["headers"].toObject();
+                        if (headers["Host"].toString().isEmpty()) headers["Host"] = originalHost;
+                        transport["headers"] = headers;
+                        outbound["transport"] = transport;
+                    }
+                }
             }
 
             if (!IsIpAddress(serverAddress)) {

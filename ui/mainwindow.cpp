@@ -47,6 +47,11 @@
 #include <QMessageBox>
 #include <QDir>
 #include <QFileInfo>
+#include <QTextBrowser>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPushButton>
+#include <QTemporaryFile>
 
 void UI_InitMainWindow() {
     mainwindow = new MainWindow;
@@ -64,6 +69,90 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Setup misc UI
     themeManager->ApplyTheme(NekoGui::dataStore->theme);
     ui->setupUi(this);
+    {
+        auto faqPage = new QWidget(ui->down_tab);
+        auto faqLayout = new QVBoxLayout(faqPage);
+        faqLayout->setContentsMargins(4, 4, 4, 4);
+        auto faqText = new QTextBrowser(faqPage);
+        faqText->setOpenExternalLinks(true);
+        faqText->setReadOnly(true);
+        faqText->setHtml(tr(
+            "<h2>Getting started and troubleshooting</h2>"
+            "<h3>TUN and Strict Route</h3>"
+            "<p>TUN creates a virtual network interface so applications can use the proxy automatically. "
+            "Strict Route controls how routes and traffic outside the TUN interface are handled; it does not choose DNS servers. "
+            "If TUN reports that the operation is not permitted, check the system's TUN permissions. The optional DNS rule below handles DNS authorization only; it does not grant permission to create a TUN device. "
+            "See the <a href='https://sing-box.sagernet.org/configuration/inbound/tun/'>sing-box TUN documentation</a>.</p>"
+            "<h3>Simple DNS</h3>"
+            "<p>Open <b>Preferences → Routing → DNS</b> and use <b>Simple DNS Settings</b> to set Remote DNS and Direct DNS. "
+            "If a DNS server is specified by a hostname, resolving that hostname may itself require working DNS. An IP-based DNS endpoint can avoid this lookup loop. "
+            "For example, the built-in choices include <code>https://8.8.8.8/dns-query</code> for Remote DNS and <code>223.5.5.5</code> for Direct DNS. "
+            "Choose DNS servers you trust and check that your routing rules allow them to connect.</p>"
+            "<h3>Fedora authorization prompts</h3>"
+            "<p>Fedora may ask for administrator authorization when TUN changes system DNS. The optional rule below allows the active local account to perform only "
+            "systemd-resolved DNS server, domain, and default-route actions for the <code>neko-tun</code> interface. "
+            "Other applications running as this account can use the same permission. Installing and removing the rule requires administrator approval.</p>"
+            "<h3>Server addresses</h3>"
+            "<p>Server domain names are resolved when a profile starts. The saved profile keeps its hostname. If resolution fails, check your system DNS and the spelling of the server address. "
+            "The existing <b>Resolve domain</b> action can save an IP into a profile manually.</p>"
+            "<h3>TLS and Allow insecure</h3>"
+            "<p>Keep certificate verification enabled. <b>Allow insecure</b> skips TLS certificate checks and can make the connection vulnerable to interception. "
+            "If your server address is an IP, ask your provider for the TLS server name and enter it in the profile; do not enable insecure as a workaround. "
+            "See the <a href='https://sing-box.sagernet.org/configuration/shared/tls/'>sing-box TLS documentation</a>.</p>"));
+        faqLayout->addWidget(faqText, 1);
+        ui->down_tab->addTab(faqPage, tr("FAQ"));
+#ifdef Q_OS_LINUX
+        auto actionLayout = new QHBoxLayout;
+        auto policyStatus = new QLabel(faqPage);
+        auto installPolicy = new QPushButton(tr("Install DNS authorization rule"), faqPage);
+        auto removePolicy = new QPushButton(tr("Remove rule"), faqPage);
+        actionLayout->addWidget(policyStatus, 1);
+        actionLayout->addWidget(installPolicy);
+        actionLayout->addWidget(removePolicy);
+        faqLayout->addLayout(actionLayout);
+        auto rulePath = QStringLiteral("/etc/polkit-1/rules.d/49-nekobox-resolved-%1.rules").arg(getuid());
+        auto refreshPolicyStatus = [=] {
+            const bool installed = QFileInfo::exists(rulePath);
+            policyStatus->setText(installed ? tr("DNS authorization rule is installed") : tr("DNS authorization rule is not installed"));
+            installPolicy->setEnabled(!installed);
+            removePolicy->setEnabled(installed);
+        };
+        refreshPolicyStatus();
+        auto runPolicyAction = [=](bool remove) {
+            auto scriptFile = QFile(":/neko/install_linux_dns_policy.sh");
+            if (!scriptFile.open(QIODevice::ReadOnly)) {
+                QMessageBox::warning(this, tr("DNS authorization"), tr("The DNS authorization helper is missing from this build."));
+                return;
+            }
+            auto helper = new QTemporaryFile(QDir::tempPath() + "/nekobox_dns_policy_XXXXXX.sh", this);
+            if (!helper->open() || helper->write(scriptFile.readAll()) < 0) {
+                helper->deleteLater();
+                QMessageBox::warning(this, tr("DNS authorization"), tr("Could not prepare the DNS authorization helper."));
+                return;
+            }
+            helper->flush();
+            const auto helperPath = helper->fileName();
+            helper->setAutoRemove(false);
+            helper->setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+            auto process = new QProcess(this);
+            connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                    [=](int code, QProcess::ExitStatus) {
+                        const auto output = QString::fromLocal8Bit(process->readAllStandardOutput() + process->readAllStandardError()).trimmed();
+                        if (code != 0 && !output.isEmpty()) QMessageBox::warning(this, tr("DNS authorization"), output);
+                        else if (code == 0) QMessageBox::information(this, tr("DNS authorization"), output);
+                        QFile::remove(helperPath);
+                        helper->deleteLater();
+                        process->deleteLater();
+                        refreshPolicyStatus();
+                    });
+            QStringList args{helperPath};
+            if (remove) args << "--remove";
+            process->start("bash", args);
+        };
+        connect(installPolicy, &QPushButton::clicked, this, [=] { runPolicyAction(false); });
+        connect(removePolicy, &QPushButton::clicked, this, [=] { runPolicyAction(true); });
+#endif
+    }
     //
     connect(ui->menu_start, &QAction::triggered, this, [=]() { neko_start(); });
     connect(ui->menu_stop, &QAction::triggered, this, [=]() { neko_stop(); });

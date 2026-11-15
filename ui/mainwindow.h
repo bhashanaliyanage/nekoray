@@ -15,6 +15,7 @@
 #include <QShortcut>
 #include <QSemaphore>
 #include <QMutex>
+#include <QHash>
 
 #include "GroupSort.hpp"
 
@@ -158,6 +159,9 @@ private:
     QMutex mu_starting;
     QMutex mu_stopping;
     QMutex mu_exit;
+    QHash<int, QString> pendingResolvedAddresses;
+    int pendingResolutionProfileId = -1;
+    bool resolvingProfileAddresses = false;
     QSemaphore sem_stopped;
     int exit_reason = 0;
 
