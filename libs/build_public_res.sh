@@ -14,3 +14,4 @@ curl -fLso "$DEST/geosite.db" "https://github.com/SagerNet/sing-geosite/releases
 
 #### copy res/public ####
 cp res/public/* "$DEST/"
+cp libs/install_linux_dns_policy.sh "$DEST/nekobox_dns_policy.sh"

@@ -2,6 +2,7 @@
 
 #include "ProxyEntity.hpp"
 #include "sys/ExternalProcess.hpp"
+#include <QHash>
 
 namespace NekoGui {
     class BuildConfigResult {
@@ -22,6 +23,7 @@ namespace NekoGui {
         std::shared_ptr<ProxyEntity> ent;
         bool forTest;
         bool forExport;
+        QHash<int, QString> resolvedAddresses;
 
         // priv
         QList<int> globalProfiles;
@@ -44,7 +46,8 @@ namespace NekoGui {
         QJsonArray outbounds;
     };
 
-    std::shared_ptr<BuildConfigResult> BuildConfig(const std::shared_ptr<ProxyEntity> &ent, bool forTest, bool forExport);
+    std::shared_ptr<BuildConfigResult> BuildConfig(const std::shared_ptr<ProxyEntity> &ent, bool forTest, bool forExport,
+                                                   const QHash<int, QString> &resolvedAddresses = {});
 
     void BuildConfigSingBox(const std::shared_ptr<BuildConfigStatus> &status);
 

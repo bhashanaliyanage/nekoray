@@ -20,5 +20,6 @@
         <file>vpn/vpn-run-root.sh</file>
         <file>vpn/sing-box-vpn.json</file>
         <file>dashboard-notice.html</file>
+        <file alias="install_linux_dns_policy.sh">../libs/install_linux_dns_policy.sh</file>
     </qresource>
 </RCC>

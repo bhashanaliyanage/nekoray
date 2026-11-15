@@ -51,6 +51,33 @@ sudo pacman -S nekoray-git
 
 ## Linux 运行
 
+### Repeated DNS authorization prompts with systemd-resolved
+
+When TUN starts as a normal user, systemd-resolved may ask separately for
+permission to set DNS servers, DNS routing domains, and the default DNS route.
+The core's `cap_net_admin` capability does not authorize these D-Bus operations.
+
+To install an optional policy for your current desktop account, run from the
+project directory **without sudo**:
+
+```bash
+bash libs/install_linux_dns_policy.sh
+```
+
+Approve the single installation prompt, then restart the profile. This permits
+only the three DNS operations on `neko-tun`, while your account has an active
+local session. It also permits other processes in that session to perform those
+same operations on `neko-tun`; it does not authorize changes on Wi-Fi or Ethernet.
+The systemd-resolved version must expose the `interface` polkit detail (verified
+with systemd 259). Versions without it retain their normal authorization prompts.
+No application rebuild or polkit restart is needed.
+
+To remove the policy and restore normal authorization:
+
+```bash
+bash libs/install_linux_dns_policy.sh --remove
+```
+
 **使用 Linux 系统相信您已具备基本的排错能力，
 本项目不提供特定发行版/架构的支持，预编译文件不能满足您的需求时，请自行编译/适配。**
 
